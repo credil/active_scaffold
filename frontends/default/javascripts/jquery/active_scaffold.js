@@ -1,4 +1,17 @@
 $(document).ready(function() {
+  $('form.as_form').live('ajax:before', function(event) {
+    var as_form = $(this).closest("form");
+    $(this).find('.association-record-new').each(function(index) {
+        var record_action = 'empty';
+
+        if(ActiveScaffold.form_elements_changed($(this).find('input, textarea, select'))) {
+          record_action = 'create';
+        }
+        $(this).find('input.associated_action').val(record_action);
+    });
+    return true;
+  });
+  
   $('form.as_form').live('ajax:loading', function(event) {
     var as_form = $(this).closest("form");
     if (as_form && as_form.attr('data-loading') == 'true') {
@@ -34,6 +47,7 @@ $(document).ready(function() {
       } else {
         // hack: jquery requires if you request for javascript that javascript
         // is coming back, however rails has a different mantra
+        // Not needed anymore just included for backwards compatibility with jquery_vho
         if (action_link.position) {
           if (parseFloat($.fn.jquery) >= 1.5) {
             event.data_type = 'text';
@@ -45,6 +59,15 @@ $(document).ready(function() {
         if (action_link.loading_indicator) action_link.loading_indicator.css('visibility','visible');
         action_link.disable();
       }
+    }
+    return true;
+  });
+  $('a.as_action').live('ajax:beforeSend', function(event, xhr, settings) {
+    xhr.setRequestHeader('accept', '*/*;q=0.5, ' + settings.accepts.script);
+    var action_link = ActiveScaffold.ActionLink.get($(this));
+    if (action_link && action_link.position) {
+      settings.dataType = 'text';
+      settings.dataTypes = ['text'];
     }
     return true;
   });
@@ -85,11 +108,23 @@ $(document).ready(function() {
       var refresh_data = as_cancel.attr('data-refresh');
       if (refresh_data === 'true' && action_link.refresh_url) {
         event.data_url = action_link.refresh_url;
+        as_cancel.attr('href', action_link.refresh_url);
         if (action_link.position) event.data_type = 'html' 
       } else if (refresh_data === 'false' || typeof(cancel_url) == 'undefined' || cancel_url.length == 0) {
         action_link.close();
         return false;
       }
+    }
+    return true;
+  });
+  $('a.as_cancel').live('ajax:beforeSend', function(event, xhr, settings) {
+    var as_cancel = $(this);
+    var action_link = ActiveScaffold.ActionLink.get($(this));
+    var refresh_data = as_cancel.attr('data-refresh');
+
+    if (action_link && action_link.position && refresh_data === 'true' && action_link.refresh_url) {
+      settings.dataType = 'html';
+      settings.dataTypes = ['html'];
     }
     return true;
   });
@@ -140,11 +175,25 @@ $(document).ready(function() {
     $(this).prevAll('img.loading-indicator').css('visibility','hidden');
     return true;
   });
-  $('input[type=button].as_add_existing').live('ajax:before', function(event) {
-    var url = $(this).attr('href').replace('--ID--', $(this).prev().val());
-    event.data_url = url;
-    return true;
+  $('a.as_add_existing').live('ajax:before', function(event) {
+    var selected_id = $(this).prev().val();
+    if (selected_id) {
+      var url = $(this).attr('href').replace('--ID--', $(this).prev().val());
+      $(this).attr('href', url);
+      event.data_url = url;
+      return true;
+    } else {
+      return false;
+    }
+    
   });
+  $('a.as_destroy_existing').live('click', function(event) {
+    var associated_record = $(this).closest('tr.association-record');
+    ActiveScaffold.delete_subform_record(associated_record);
+    event.stopPropagation();
+    return false;
+  });
+
   $('input.update_form, textarea.update_form, select.update_form').live('change', function(event) {
       var element = $(this);
       var as_form = element.closest('form.as_form');
@@ -229,6 +278,24 @@ $(document).ready(function() {
     ActiveScaffold.focus_first_element_of_form(as_form);
     return true;
   });
+  $('li.horizontal-sub-form').live('as:form_element_loaded', function(event) {
+    $(this).find('a.as_associated_form_link').each(function(index) {
+        ActiveScaffold.show($(this));
+        //Show select Box for add_existing as well
+        if($(this).has('as_add_existing')) {
+          ActiveScaffold.show($(this).prev());
+        }
+    })
+    return true;
+  });
+  $('li.sub-form').live('as:form_element_loaded', function(event) {
+    $(this).find('.association-record-new').each(function(index) {
+        $(this).find('input, textarea, select').each(function(index) {
+          $(this).data('value_was', $(this).val());
+        })
+    })
+    return true;
+  });
   $('span.mark_heading, span.in_place_editor_field[data-ie_mode="inline_checkbox"]').live('click', function(event) {
     ActiveScaffold.process_checkbox_inplace_edit($(this).find('input:checkbox'), ActiveScaffold.inplace_edit_options($(this)));
     return true;
@@ -240,12 +307,20 @@ $(document).ready(function() {
     return true;
   });
   $('tr.inline-adapter-autoopen').live('as:list_row_loaded', function(event) {
-    var actionlink_id = $(event.target).attr('data-actionlinkid');
-    if(actionlink_id) {
-      var action_link = ActiveScaffold.ActionLink.get(actionlink_id);
-      if (action_link) {
-        action_link.set_opened();
-      }
+    var actionlink_controllers = $(event.target).attr('data-actionlink-controllers');
+    if(actionlink_controllers) {
+      actionlink_controllers = actionlink_controllers.split('::');
+      $(this).prev('tr').find('a.index').each(function(index) {
+        var action_link = $(this);
+        for (var i = 0; i < actionlink_controllers.length; i++) {
+          if (actionlink_controllers[i] === action_link.attr('data-controller')) {
+            var as_action_link = ActiveScaffold.ActionLink.get(action_link);
+            if (as_action_link) {
+              as_action_link.set_opened();
+            }
+          }
+        }
+      });
     }
     return true;
   });
@@ -260,6 +335,7 @@ $(document).ready(function() {
     return true;
   });
   ActiveScaffold.trigger_load_events($('[data-as_load]'));
+  ActiveScaffold.load_embedded_conrollers();
   
 });
 
@@ -580,7 +656,8 @@ var ActiveScaffold = {
     if (errors.hasClass('association-record-errors')) {
       this.replace_html(errors, '');
     }
-    this.remove(record);
+    record.find('input.associated_action').val('delete');
+    this.hide(record);
   },
 
   report_500_response: function(active_scaffold_id) {
@@ -841,6 +918,27 @@ var ActiveScaffold = {
        break;
       }
     });
+  },
+
+  load_embedded_conrollers: function(){
+    $.each($('a.as_link_to_component'), function(index) {
+      var div_element = $(this).closest('div.active-scaffold-component');
+      div_element.load($(this).attr('href').append_params({embedded: true}));
+    });
+  },
+
+  form_elements_changed: function(form_elements){
+    var form_elements_count = form_elements.length;
+    var i = 0;
+    var changed = false;
+
+    while(changed === false && i < form_elements_count) {
+      if($(form_elements[i]).val() != $(form_elements[i]).data('value_was')) {
+        changed = true;
+      }
+      i++;
+    }
+    return changed;
   }
 }
 

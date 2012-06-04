@@ -230,11 +230,22 @@ document.observe("dom:loaded", function() {
     if(loading_indicator) loading_indicator.style.visibility = 'hidden';  
     return true;
   });
-  document.on('ajax:before', 'input[type=button].as_add_existing', function(event) {
+  document.on('ajax:before', 'a.as_add_existing', function(event) {
     var button = event.findElement();
-    var url =  button.readAttribute('href').sub('--ID--', button.previous().getValue());
-    event.memo.url = url;
-    return true;
+    var selected_id = button.previous().getValue();
+    if (selected_id) {
+      var url =  button.readAttribute('href').sub('--ID--', selected_id);
+      event.memo.url = url;
+      return true;
+    } else {
+      return false;
+    }
+  });
+  document.on('click', 'a.as_destroy_existing', function(event) {
+    var associated_record = event.findElement('tr.association-record');
+    ActiveScaffold.delete_subform_record(associated_record);
+    event.stop();
+    return false;
   });
   document.on('change', 'input.update_form, textarea.update_form, select.update_form', function(event) {
     var element = event.findElement();
@@ -314,13 +325,30 @@ document.observe("dom:loaded", function() {
       ActiveScaffold.focus_first_element_of_form(as_form);
       return true;
   });
+  document.on('as:form_element_loaded', 'li.horizontal-sub-form', function(event, element) {
+      element.select('a.as_associated_form_link').each(function(element) {
+        ActiveScaffold.show(element);
+        //Show select Box for add_existing as well
+        if(element.hasClassName('as_add_existing')) {
+          ActiveScaffold.show(element.previous());
+        }
+      });
+      return true;
+  });
   document.on('as:list_row_loaded', 'tr.inline-adapter-autoopen', function(event, element) {
-    var actionlink_id = element.readAttribute('data-actionlinkid');
-    if(actionlink_id) {
-      var action_link = ActiveScaffold.ActionLink.get(actionlink_id);
-      if (action_link) {
-        action_link.set_opened();
-      }
+    var actionlink_controllers = event.element().readAttribute('data-actionlink-controllers');
+    if(actionlink_controllers) {
+      actionlink_controllers = actionlink_controllers.split('::');
+      element.previous('tr').select('a.index').each(function(action_link) {
+        for (var i = 0; i < actionlink_controllers.length; i++) {
+          if (actionlink_controllers[i] === action_link.readAttribute('data-controller')) {
+            var as_action_link = ActiveScaffold.ActionLink.get(action_link);
+            if (as_action_link) {
+              as_action_link.set_opened();  
+            }
+          }
+        }
+      });
     }
     return true;
   });
@@ -335,6 +363,7 @@ document.observe("dom:loaded", function() {
     return true;
   });
   ActiveScaffold.trigger_load_events($$('[data-as_load]'));
+  ActiveScaffold.load_embedded_conrollers();
 });
 
 
@@ -490,7 +519,7 @@ var ActiveScaffold = {
       tbody.insert({top: html});
       new_row = tbody.firstDescendant();
     } else if (options.insert_at == 'bottom') {
-      var last_row = tbody.childElements().reverse().detect(function(node) { return node.hasClassName('record') || node.hasClassName('inline-adapter')});
+      var last_row = tbody.childElements().reverse().detect(function(node) {return node.hasClassName('record') || node.hasClassName('inline-adapter')});
       if (last_row) {
         last_row.insert({after: html});
       } else {
@@ -529,7 +558,8 @@ var ActiveScaffold = {
     if (errors.hasClassName('association-record-errors')) {
       this.replace_html(errors, '');
     }
-    this.remove(record);
+    record.down('input.associated_action').value('delete');
+    this.hide(record);
   },
 
   report_500_response: function(active_scaffold_id) {
@@ -651,7 +681,7 @@ var ActiveScaffold = {
     var mark_checkboxes = $$('#' + element.readAttribute('id') + ' > tr.record td.marked-column input[type="checkbox"]');
     mark_checkboxes.each(function(item) {
      if(options.checked === true) {
-       item.writeAttribute({ checked: 'checked' });
+       item.writeAttribute({checked: 'checked'});
      } else {
        item.removeAttribute('checked');
      }
@@ -660,7 +690,7 @@ var ActiveScaffold = {
     if(options.include_mark_all === true) {
       var mark_all_checkbox = element.previous('thead').down('th.marked-column_heading span input[type="checkbox"]');
       if(options.checked === true) {
-        mark_all_checkbox.writeAttribute({ checked: 'checked' }); 
+        mark_all_checkbox.writeAttribute({checked: 'checked'}); 
       } else {
         mark_all_checkbox.removeAttribute('checked');
       }
@@ -697,6 +727,13 @@ var ActiveScaffold = {
        element.fire('as:form_element_unloaded');
        break;
       }
+    });
+  },
+
+  load_embedded_conrollers: function(){
+    $$('a.as_link_to_component').each(function(element) {
+      var div_element = element.up('div.active-scaffold-component');
+      new Ajax.Updater(div_element, element.readAttribute('href').append_params({embedded: true}), {method: 'get', evalScripts: true});
     });
   }
 
